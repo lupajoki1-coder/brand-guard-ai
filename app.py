@@ -2,125 +2,138 @@ import streamlit as st
 import google.generativeai as genai
 import Levenshtein
 from googlesearch import search
+import time
 
-# --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="BrandGuard AI 2.5", page_icon="⚡", layout="wide")
+# --- 1. KONFIGURASI HALAMAN ---
+st.set_page_config(
+    page_title="BrandGuard AI 2.5", 
+    page_icon="⚡", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- JUDUL & SIDEBAR ---
-st.title("⚡ BrandGuard AI: Forensic 2.5")
-st.markdown("""
-Aplikasi Forensik Merek bertenaga **Google Gemini 2.5 Flash**.
-Model terbaru ini memiliki latensi ultra-rendah dan penalaran multimodal yang lebih tajam.
-""")
-
+# --- 2. SIDEBAR & KEAMANAN API ---
 with st.sidebar:
     st.header("⚙️ Konfigurasi Sistem")
-    api_key = st.text_input("Masukkan Google Gemini API Key", type="password")
-    st.markdown("[Dapatkan API Key Gratis di Google AI Studio](https://aistudio.google.com/app/apikey)")
     
+    # LOGIKA KEAMANAN: Cek Secrets dulu
+    api_key = None
+    if "GOOGLE_API_KEY" in st.secrets:
+        api_key = st.secrets["GOOGLE_API_KEY"]
+        st.success("✅ API Key Terdeteksi (Auto)")
+    else:
+        api_key = st.text_input("Masukkan Gemini API Key", type="password")
+        st.caption("Belum punya? [Dapatkan disini](https://aistudio.google.com/app/apikey)")
+
     st.divider()
+    
+    # PILIH MODEL (Update 2026)
     st.subheader("🧠 Model Engine")
-    # Selector Model (Diupdate untuk Tahun 2026)
     selected_model = st.selectbox(
-        "Versi Model Aktif:",
+        "Versi Model:",
         (
-            "gemini-2.5-flash",      # ✅ REKOMENDASI UTAMA (Stable 2026)
-            "gemini-2.5-pro",        # Opsi High-Intelligence
-            "gemini-2.0-flash"       # Legacy Fallback (Expire Soon)
+            "gemini-2.5-flash",      # REKOMENDASI: Stabil & Cepat
+            "gemini-2.0-flash-exp",  # Alternatif Experimental
+            "gemini-1.5-pro"         # Alternatif High-Reasoning
         ),
         index=0
     )
     
-    st.info(f"Menggunakan Engine: **{selected_model}**")
-    if "2.5" in selected_model:
-        st.caption("🚀 Status: Latest Stable Build (Jan 2026)")
+    st.info(f"Status: Menggunakan **{selected_model}**")
 
-# --- FUNGSI 1: DINAMIS SEARCH PDKI (GOOGLE DORKING) ---
+# --- 3. FUNGSI PENCARIAN (GOOGLE DORKING) ---
 def search_pdki_dynamic(brand_name):
-    """
-    Mencari jejak merek di situs PDKI menggunakan Google Search Index.
-    """
+    """Mencari jejak merek di situs PDKI via Google Search Index"""
     competitors = []
-    # Query spesifik ke database DJKI
     query = f'site:pdki-indonesia.dgip.go.id "{brand_name}"'
     
     try:
-        # Mengambil 10 hasil teratas
+        # Mengambil maksimal 10 hasil
         for url in search(query, num_results=10, lang="id"):
             competitors.append(url)
     except Exception as e:
-        st.warning(f"Akses pencarian terbatas: {e}")
+        st.warning(f"Google Search Warning: {e}")
     
     return competitors
 
-# --- FUNGSI 2: ANALISIS GEMINI 2.5 FLASH ---
-def analyze_brand_ai(api_key, model_version, brand, cls, competitors):
-    genai.configure(api_key=api_key)
+# --- 4. FUNGSI ANALISIS AI ---
+def analyze_brand_ai(key, model_ver, brand, cls, competitors):
+    if not key: return "⚠️ Error: API Key tidak ditemukan."
     
+    genai.configure(api_key=key)
+    
+    # Konfigurasi Model dengan Error Handling
     try:
-        model = genai.GenerativeModel(model_version)
+        model = genai.GenerativeModel(model_ver)
     except Exception as e:
-        return f"Error Model: {e}. Pastikan API Key Anda memiliki akses ke model 2.5."
+        return f"Error Inisialisasi Model: {e}"
+
+    # Siapkan Data
+    comp_str = "\n".join(competitors) if competitors else "Tidak ditemukan link spesifik di index pencarian."
     
-    comp_str = "\n".join(competitors) if competitors else "Tidak ditemukan link spesifik di index pencarian Google."
-    
-    # Prompt yang dioptimalkan untuk Gemini 2.5
+    # Prompt (Instruksi) untuk AI
     prompt = f"""
-    Bertindaklah sebagai Konsultan HKI Senior di Indonesia.
+    Bertindaklah sebagai Konsultan HKI (Hak Kekayaan Intelektual) Profesional.
     
-    OBJEK: Merek "{brand}" (Kelas {cls})
-    TEMUAN INDEX: {comp_str}
+    DATA ANALISIS:
+    - Nama Merek: "{brand}"
+    - Kelas: {cls}
+    - Temuan Index PDKI: 
+    {comp_str}
     
-    Lakukan 'Reasoning Trace' singkat, lalu berikan kesimpulan:
-    1. **Analisis Fonetik & Visual**: Apakah ada kemiripan bunyi/tampilan dengan merek terkenal atau temuan di atas?
-    2. **Analisis Semantik**: Apakah kata ini melanggar ketertiban umum/agama (Pasal 20 UU Merek)?
-    3. **Skor Keberhasilan**: (0-100%).
+    TUGAS ANDA:
+    Lakukan analisis risiko berdasarkan UU Merek No 20 Tahun 2016.
+    1. **Cek Fonetik/Bunyi**: Apakah nama ini mirip dengan merek terkenal atau temuan link di atas?
+    2. **Cek Semantik**: Apakah nama ini melanggar norma, agama, atau terlalu umum (deskriptif)?
+    3. **Kesimpulan**: Berikan persentase peluang keberhasilan (0-100%) dan saran singkat.
     
-    Jawab tegas, padat, dan gunakan format Markdown.
+    Jawab dengan format Markdown yang rapi.
     """
     
-    with st.spinner(f'⚡ Gemini {model_version} sedang memproses data...'):
+    with st.spinner(f'⚡ {model_ver} sedang menganalisis hukum...'):
         try:
             response = model.generate_content(prompt)
             return response.text
         except Exception as e:
-            return f"⚠️ Gagal memproses: {e}. \nCoba ganti ke 'gemini-2.0-flash' jika akun Anda belum migrasi penuh."
+            return f"⚠️ Terjadi kesalahan API: {e}. \nSaran: Coba ganti model ke versi lain di sidebar."
 
-# --- ANTARMUKA UTAMA ---
+# --- 5. ANTARMUKA UTAMA (UI) ---
+st.title("⚡ BrandGuard AI: Forensic")
+st.markdown("Sistem analisis kelayakan merek berbasis AI Generatif dan Data Index Web.")
+
 col1, col2 = st.columns([1, 2])
 
 with col1:
-    st.subheader("📝 Input Data Merek")
+    st.markdown("### 📝 Input Data")
     brand_name = st.text_input("Nama Merek", "MANAKALA")
     brand_class = st.selectbox("Kelas Merek", 
                                ["Kelas 3 (Kosmetik/Parfum)", 
-                                "Kelas 9 (Teknologi)",
                                 "Kelas 25 (Pakaian)", 
-                                "Kelas 30 (Kopi/Makanan)", 
-                                "Kelas 35 (Jasa)",
+                                "Kelas 30 (Makanan/Kopi)", 
+                                "Kelas 35 (Jasa Toko)", 
                                 "Lainnya"])
     
-    start_btn = st.button("🔍 Mulai Investigasi", type="primary")
+    analyze_btn = st.button("🔍 Mulai Investigasi", type="primary", use_container_width=True)
 
 with col2:
-    if start_btn:
+    if analyze_btn:
         if not api_key:
-            st.error("⚠️ Masukkan API Key terlebih dahulu.")
+            st.error("⚠️ API Key belum diisi! Masukkan di sidebar atau set di Secrets.")
         else:
-            # Tahap 1: Bukti Digital
-            st.success(f"Menginvestigasi: **{brand_name}**")
+            # Tahap A: Cari Bukti
+            st.success(f"Memproses merek: **{brand_name}**")
             
-            with st.expander("📂 Bukti Digital (Index PDKI)"):
+            with st.expander("📂 Bukti Digital (Temuan Index Web)", expanded=False):
                 found_links = search_pdki_dynamic(brand_name)
                 if found_links:
                     for link in found_links:
                         st.markdown(f"- [{link}]({link})")
                 else:
-                    st.write("Belum ditemukan index spesifik. (Indikasi Positif)")
+                    st.info("Belum ditemukan data spesifik di index Google (Indikasi awal yang baik).")
 
-            # Tahap 2: AI Analysis
-            analysis_result = analyze_brand_ai(api_key, selected_model, brand_name, brand_class, found_links)
+            # Tahap B: Analisis AI
+            result = analyze_brand_ai(api_key, selected_model, brand_name, brand_class, found_links)
             
-            st.markdown("---")
-            st.subheader("📊 Laporan Forensik (Gemini 2.5)")
-            st.markdown(analysis_result)
+            st.divider()
+            st.subheader("📊 Hasil Analisis Forensik")
+            st.markdown(result)

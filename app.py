@@ -3,330 +3,343 @@ import google.generativeai as genai
 from googlesearch import search
 from fpdf import FPDF
 from PIL import Image
-import io
 import datetime
 
-# --- 1. KONFIGURASI UI/UX PRO (MOBILE FRIENDLY & DEPTH) ---
+# --- 1. CONFIG & UI STYLE (NO "AI" MENTION) ---
 st.set_page_config(
     page_title="KSB Suite: Forensic Audit", 
-    page_icon="🛡️", 
+    page_icon="⚖️", 
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-# CSS Injection: Deep Glassmorphism & Responsive Fixes
+# CSS: Professional 'Audit Firm' aesthetic
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;800&family=Outfit:wght@400;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;700&display=swap');
     
-    /* Background & Base */
     .stApp {
-        background-color: #e2e8f0;
-        background-image: 
-            radial-gradient(at 0% 0%, hsla(210, 100%, 96%, 1) 0, transparent 50%), 
-            radial-gradient(at 100% 100%, hsla(220, 100%, 94%, 1) 0, transparent 50%);
+        background-color: #f8fafc; /* Slate-50 */
         font-family: 'Plus Jakarta Sans', sans-serif;
     }
     
-    /* DEPTH EFFECT CARD (Glassmorphism) */
-    .depth-card {
-        background: rgba(255, 255, 255, 0.7);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.9);
-        border-radius: 24px;
-        padding: 30px;
-        box-shadow: 
-            0 10px 40px -10px rgba(0,0,0,0.1),
-            0 0 0 1px rgba(255,255,255,0.5) inset; /* Inner glow */
-        margin-bottom: 24px;
-        transition: transform 0.3s ease;
-    }
-    
-    /* Responsive Typography */
-    h1 { font-family: 'Outfit', sans-serif; color: #0f172a; font-weight: 800; letter-spacing: -1px; }
-    h2, h3 { font-family: 'Outfit', sans-serif; color: #1e293b; font-weight: 700; }
-    p { color: #475569; line-height: 1.6; }
-    
-    /* Custom Inputs (More Depth) */
-    .stTextInput>div>div>input, .stSelectbox>div>div>div {
-        border-radius: 12px;
-        border: 1px solid #cbd5e1;
+    /* Card Style: Clean Corporate Look */
+    .audit-card {
         background: white;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05) inset;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        padding: 30px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-bottom: 24px;
     }
     
-    /* Primary Action Button */
+    /* Typography */
+    h1 { color: #0f172a; font-weight: 800; letter-spacing: -0.5px; }
+    h2 { color: #334155; font-size: 1.2rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    
+    /* Inputs */
+    .stTextInput>div>div>input, .stSelectbox>div>div>div {
+        border-radius: 8px;
+        border: 1px solid #cbd5e1;
+    }
+    
+    /* Action Button: 'System' feel */
     .stButton>button {
-        background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+        background-color: #0f172a; /* Slate-900 */
         color: white;
-        border: none;
-        border-radius: 16px;
+        border-radius: 8px;
         padding: 0.8rem 2rem;
-        font-weight: 700;
-        box-shadow: 0 10px 20px -5px rgba(15, 23, 42, 0.3);
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        border: none;
         width: 100%;
-        transition: all 0.2s;
+        transition: background 0.2s;
     }
     .stButton>button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 15px 25px -5px rgba(15, 23, 42, 0.4);
-    }
-
-    /* Fix Mobile Padding */
-    @media (max-width: 640px) {
-        .depth-card { padding: 20px; border-radius: 20px; }
-        h1 { font-size: 1.8rem !important; }
+        background-color: #1e293b;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATA REFERENSI: NICE CLASSIFICATION (VERBATIM LENGKAP) ---
-# Mengacu pada standar Klasifikasi Nice yang legal dan resmi.
+# --- 2. DATA REFERENSI (Nice Classification) ---
 FULL_CLASSES = [
-    "Kelas 1: Bahan Kimia (Industri, Sains, Fotografi)",
-    "Kelas 2: Cat, Pernis, Pengawet Kayu",
-    "Kelas 3: Kosmetik, Pembersih, Parfum, Skincare",
-    "Kelas 4: Minyak Industri, Pelumas, Bahan Bakar",
-    "Kelas 5: Farmasi, Obat, Suplemen, Makanan Bayi",
-    "Kelas 6: Logam Tidak Mulia, Bahan Bangunan Logam",
-    "Kelas 7: Mesin, Perkakas Mekanis, Motor",
-    "Kelas 8: Perkakas Tangan (Manual), Pisau, Garpu",
-    "Kelas 9: Alat Ilmiah, Software, Kacamata, Elektronik",
-    "Kelas 10: Alat Bedah, Medis, Kedokteran Gigi",
-    "Kelas 11: Alat Penerangan, Pemanas, Pendingin",
-    "Kelas 12: Kendaraan, Alat Transportasi Darat/Air/Udara",
-    "Kelas 13: Senjata Api, Amunisi, Kembang Api",
-    "Kelas 14: Logam Mulia, Perhiasan, Jam Tangan",
-    "Kelas 15: Alat Musik",
-    "Kelas 16: Kertas, Karton, Alat Tulis, Cetakan",
-    "Kelas 17: Karet, Plastik (Setengah Jadi), Pipa Fleksibel",
-    "Kelas 18: Kulit, Tas, Dompet, Payung",
-    "Kelas 19: Bahan Bangunan (Bukan Logam), Aspal",
-    "Kelas 20: Perabot, Mebel, Cermin, Bingkai",
-    "Kelas 21: Alat Rumah Tangga, Dapur, Gelas, Porselen",
-    "Kelas 22: Tali, Jaring, Tenda, Karung",
-    "Kelas 23: Benang dan Tali untuk Tekstil",
-    "Kelas 24: Tekstil, Kain, Sprei, Selimut",
-    "Kelas 25: Pakaian, Alas Kaki, Tutup Kepala",
-    "Kelas 26: Renda, Bordir, Pita, Kancing",
-    "Kelas 27: Karpet, Tikar, Linoleum",
-    "Kelas 28: Mainan, Alat Olahraga, Game",
-    "Kelas 29: Daging, Ikan, Unggas, Buah/Sayur Olahan",
-    "Kelas 30: Kopi, Teh, Roti, Beras, Gula, Rempah",
-    "Kelas 31: Hasil Pertanian Segar, Buah/Sayur Hidup",
-    "Kelas 32: Bir, Minuman Non-Alkohol, Jus, Air Mineral",
-    "Kelas 33: Minuman Beralkohol (Kecuali Bir)",
-    "Kelas 34: Tembakau, Rokok, Korek Api",
-    "Kelas 35: Periklanan, Manajemen Usaha, Toko (Retail)",
-    "Kelas 36: Asuransi, Keuangan, Real Estate",
-    "Kelas 37: Konstruksi, Perbaikan, Pemasangan",
-    "Kelas 38: Telekomunikasi",
-    "Kelas 39: Transportasi, Pengemasan, Wisata",
-    "Kelas 40: Pengolahan Material (Jasa)",
-    "Kelas 41: Pendidikan, Pelatihan, Hiburan, Olahraga",
-    "Kelas 42: Jasa Ilmiah, Teknologi, Desain, IT",
-    "Kelas 43: Jasa Penyediaan Makanan/Minuman (Resto/Kafe)",
-    "Kelas 44: Jasa Medis, Kedokteran Hewan, Kecantikan",
-    "Kelas 45: Jasa Hukum, Keamanan, Personal"
+    "Kelas 03 - Kosmetik, Pembersih, Parfum",
+    "Kelas 05 - Farmasi & Obat-obatan",
+    "Kelas 09 - Teknologi, Software, Elektronik",
+    "Kelas 25 - Pakaian, Alas Kaki, Penutup Kepala",
+    "Kelas 30 - Kopi, Teh, Makanan Pokok",
+    "Kelas 32 - Minuman Non-Alkohol",
+    "Kelas 35 - Jasa Periklanan & Toko (Retail)",
+    "Kelas 41 - Jasa Pendidikan & Hiburan",
+    "Kelas 43 - Jasa Restoran & Kafe",
+    "Kelas 45 - Jasa Hukum & Keamanan",
+    "Lainnya (Sistem akan mendeteksi otomatis)"
 ]
 
-# --- 3. FUNGSI LOGIC (SEARCH & PDF) ---
-
-def smart_pdki_search(keyword):
-    """
-    Rekomendasi Terbaik: Google Dorking Spesifik ke Server PDKI.
-    Metode ini legal, tidak membebani server pemerintah, dan akurat.
-    """
+# --- 3. CORE LOGIC (SEARCH) ---
+def legal_index_search(keyword):
+    """Melakukan pencarian jejak digital pada index database pemerintah."""
     results = []
-    # Strategi: Cari "Nama" ATAU "Kata Kunci" di dalam situs PDKI
+    # Query ke index publik (Legal & Safe)
     query = f'site:pdki-indonesia.dgip.go.id "{keyword}" OR {keyword}'
     try:
-        # Mengambil 8 hasil teratas untuk konteks
-        for url in search(query, num_results=8, lang="id"):
+        for url in search(query, num_results=6, lang="id"):
             results.append(url)
     except:
-        pass # Fail gracefully
+        pass
     return results
 
-def generate_pdf_report(brand, cls, analysis_text, risk):
-    pdf = FPDF()
+# --- 4. PDF GENERATOR (TABLE FORMAT - EYE CATCHING) ---
+class AuditPDF(FPDF):
+    def header(self):
+        # Header Biru Tua Profesional
+        self.set_fill_color(15, 23, 42) # Slate-900
+        self.rect(0, 0, 210, 40, 'F')
+        
+        self.set_font('Arial', 'B', 20)
+        self.set_text_color(255, 255, 255)
+        self.cell(0, 25, 'KSB SUITE: FORENSIC REPORT', 0, 1, 'C')
+        
+        self.set_font('Arial', '', 9)
+        self.set_text_color(148, 163, 184) # Slate-400
+        self.cell(0, -10, 'OFFICIAL TRADEMARK AUDIT DOCUMENT', 0, 1, 'C')
+        self.ln(20)
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f'Page {self.page_no()} | Generated by KSB System V.6.0 | Confidential', 0, 0, 'C')
+
+    def table_row(self, label, content, fill=False):
+        # Fungsi helper untuk membuat baris tabel
+        self.set_font('Arial', 'B', 10)
+        self.set_fill_color(241, 245, 249) # Slate-100
+        self.set_text_color(15, 23, 42)
+        
+        # Kolom Label
+        x_start = self.get_x()
+        y_start = self.get_y()
+        
+        self.cell(50, 10, label, 1, 0, 'L', True) # Header Kolom Kiri
+        
+        # Kolom Isi (Multi Cell untuk teks panjang)
+        self.set_font('Arial', '', 10)
+        self.set_xy(x_start + 50, y_start)
+        
+        # Simpan posisi Y sebelum menulis multicell
+        self.multi_cell(140, 10, content, 1, 'L', fill)
+        
+        # Reset posisi untuk baris berikutnya (jika multicell nambah tinggi)
+        # Sederhananya untuk demo ini kita pakai fixed height atau logic height sederhana
+        # Di FPDF standar agak rumit auto-height tabel, kita gunakan ln() standar
+        # Untuk "Eye Catching", kita pastikan konten bersih.
+
+def create_professional_pdf(brand, cls, analysis_raw, risk_score):
+    pdf = AuditPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # Header Professional
-    pdf.set_font("Arial", "B", 14)
-    pdf.set_text_color(15, 23, 42) # Slate-900
-    pdf.cell(0, 10, "AUDIT FORENSIK MEREK (KSB SUITE)", 0, 1, 'C')
+    # --- SECTION 1: CASE DETAILS (TABLE STYLE) ---
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_text_color(15, 23, 42)
+    pdf.cell(0, 10, 'I. CASE IDENTIFICATION', 0, 1, 'L')
+    pdf.ln(2)
     
-    # Metadata Box
-    pdf.set_fill_color(240, 249, 255) # Sky-50
-    pdf.rect(10, 25, 190, 20, 'F')
-    pdf.set_y(28)
-    pdf.set_font("Arial", "", 9)
-    pdf.cell(0, 5, f"TARGET: {brand.upper()}", 0, 1, 'C')
-    pdf.cell(0, 5, f"KELAS: {cls[:40]}...", 0, 1, 'C')
-    pdf.cell(0, 5, f"STATUS RISIKO: {risk}", 0, 1, 'C')
+    pdf.set_line_width(0.3)
+    pdf.set_draw_color(203, 213, 225) # Slate-300
+    
+    # Row 1
+    pdf.set_font('Arial', 'B', 10)
+    pdf.set_fill_color(248, 250, 252)
+    pdf.cell(50, 10, ' TARGET MARK', 1, 0, 'L', 1)
+    pdf.set_font('Arial', '', 10)
+    pdf.cell(140, 10, f' {brand.upper()}', 1, 1, 'L', 0)
+    
+    # Row 2
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(50, 10, ' CLASSIFICATION', 1, 0, 'L', 1)
+    pdf.set_font('Arial', '', 10)
+    pdf.cell(140, 10, f' {cls}', 1, 1, 'L', 0)
+    
+    # Row 3
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(50, 10, ' AUDIT DATE', 1, 0, 'L', 1)
+    pdf.set_font('Arial', '', 10)
+    pdf.cell(140, 10, f' {datetime.date.today()}', 1, 1, 'L', 0)
+    
     pdf.ln(10)
     
-    # Content Cleaning (Remove Markdown)
-    pdf.set_font("Courier", "", 10)
-    clean_txt = analysis_text.encode('latin-1', 'replace').decode('latin-1')
-    clean_txt = clean_txt.replace("*", "").replace("#", "").replace("|", " ")
+    # --- SECTION 2: RISK ASSESSMENT (COLOR BOX) ---
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'II. RISK CALCULATOR', 0, 1, 'L')
+    pdf.ln(2)
     
-    pdf.multi_cell(0, 6, clean_txt)
+    # Warna berdasarkan risiko
+    if "HIGH" in risk_score:
+        pdf.set_fill_color(254, 226, 226) # Red-100
+        pdf.set_text_color(185, 28, 28)   # Red-700
+    elif "MEDIUM" in risk_score:
+        pdf.set_fill_color(254, 243, 199) # Yellow-100
+        pdf.set_text_color(180, 83, 9)    # Yellow-700
+    else:
+        pdf.set_fill_color(220, 252, 231) # Green-100
+        pdf.set_text_color(21, 128, 61)   # Green-700
+        
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(190, 15, f'STATUS: {risk_score}', 1, 1, 'C', 1)
     
-    # Footer
-    pdf.set_y(-20)
-    pdf.set_font("Arial", "I", 8)
-    pdf.cell(0, 10, f"Generated: {datetime.date.today()} | Confidential", 0, 0, 'C')
+    pdf.ln(10)
+    
+    # --- SECTION 3: FORENSIC FINDINGS (RAW TEXT FORMATTED) ---
+    pdf.set_text_color(15, 23, 42) # Reset Color
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 10, 'III. FORENSIC MATRIX FINDINGS', 0, 1, 'L')
+    pdf.ln(2)
+    
+    # Cleaning the raw text for PDF compatibility (Remove Emojis & Bold markdown)
+    clean_text = analysis_raw.encode('latin-1', 'ignore').decode('latin-1')
+    clean_text = clean_text.replace('**', '').replace('###', '').replace('|', '')
+    
+    # Display as a formal block
+    pdf.set_font('Courier', '', 10) # Monospace for technical look
+    pdf.set_fill_color(255, 255, 255)
+    pdf.multi_cell(190, 6, clean_text, 1, 'L', 0)
     
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 4. ENGINE AI VERBATIM (GEMINI 2.5 FLASH) ---
-def analyze_with_context(api_key, brand, cls, competitors, image_file=None):
+# --- 5. SYSTEM LOGIC (NO "AI" MENTION IN PROMPT) ---
+def run_system_audit(api_key, brand, cls, competitors, image_file=None):
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash") # Multimodal Model
+    model = genai.GenerativeModel("gemini-2.5-flash")
     
-    comp_str = "\n".join(competitors) if competitors else "Tidak ditemukan data spesifik di index publik."
+    comp_data = "\n".join(competitors) if competitors else "No direct index matches found."
     
-    # Prompt dibangun berdasarkan "Tips Merek.pdf" (Verbatim Knowledge)
-    prompt_text = f"""
-    ROLE: Auditor Merek Senior (DJKI Standar).
-    TONE: Direct, Evidence-Based, No Fluff.
+    # PROMPT DIREKAYASA UNTUK OUTPUT SEPERTI LAPORAN AUDITOR MANUSIA
+    prompt = f"""
+    ACT AS: Lead Intellectual Property Auditor.
+    TASK: Perform a strict forensic audit on the trademark application below.
+    LANGUAGE: Indonesian (Formal, Corporate Style).
     
-    AUDIT TARGET:
-    - Merek: "{brand}"
-    - Kelas: {cls}
-    - Image Uploaded: {"YA" if image_file else "TIDAK"}
+    INPUT DATA:
+    - Mark: "{brand}"
+    - Class: {cls}
+    - Visual Evidence: {"Attached" if image_file else "None"}
+    - Database Findings: {comp_data}
     
-    DATABASE CONTEXT (PDKI Findings):
-    {comp_str}
+    AUDIT PROTOCOLS (STRICTLY FOLLOW):
+    1. Phonetic Check (Sound-alike test against findings or famous marks).
+    2. Visual Check (Logo similarity / generic shapes).
+    3. Conceptual Check (Translation / Meaning collisions).
+    4. Distinctiveness Check (Is it descriptive/generic?).
 
-    INSTRUKSI AUDIT (BERDASARKAN UU MEREK NO 20/2016):
-    Lakukan analisis mendalam menggunakan prinsip-prinsip berikut (Verbatim Reference):
+    OUTPUT FORMAT REQURIEMENT (Do not use conversational filler):
+    Provide the output in a clean layout suitable for a formal report.
     
-    1. **FONETIK (TES TELINGA):** [Ref: Slide 3 PDF]
-       - Apakah bunyinya mirip dengan merek terkenal? (Contoh kasus: SANSUNG vs SAMSUNG).
-       - Hati-hati dengan "Si Kembar Beda Ejaan".
-       
-    2. **VISUAL (JIKA ADA GAMBAR):** [Ref: Slide 4 PDF]
-       - Cek "Visual Similarity". Apakah logo memiliki bentuk geometris yang meniru merek lain?
-       - Jika tidak ada gambar, analisis potensi visual teksnya.
-       
-    3. **KONSEPTUAL (MAKNA):** [Ref: Slide 5 PDF]
-       - Cek terjemahan (Contoh: RED BULL vs BANTENG MERAH).
-       - Cek makna spesifik dalam bahasa asing/daerah.
-       
-    4. **DISTINGSI (DAYA PEMBEDA):** [Ref: Slide 6 PDF]
-       - Apakah nama ini DESKRIPTIF? (Contoh: "GULA MANIS" = Ditolak Mutlak).
-       - Nama harus unik, bukan kata umum (Generik).
+    [SECTION 1: EXECUTIVE SUMMARY]
+    (1 Sentence Verdict: APPROVED / REJECTED potential)
 
-    OUTPUT FORMAT (TABEL MARKDOWN):
-    Berikan satu tabel matriks risiko (Parameter | Temuan | Status).
-    Diakhiri dengan SKOR PELUANG (0-100%) dan REKOMENDASI FINAL.
+    [SECTION 2: DETAILED MATRIX]
+    - Phonetic Analysis: [Details...]
+    - Conceptual Analysis: [Details...]
+    - Visual Analysis: [Details...]
+    - Distinctiveness: [Details...]
+
+    [SECTION 3: RECOMMENDATION]
+    (Bullet points of tactical advice)
+
+    [RISK LEVEL]
+    (Write exactly one: HIGH RISK / MEDIUM RISK / LOW RISK)
     """
     
-    inputs = [prompt_text]
+    inputs = [prompt]
     if image_file:
         img = Image.open(image_file)
         inputs.append(img)
-        inputs.append("Ini adalah logo visual yang diajukan untuk merek ini.")
-
+    
     try:
         response = model.generate_content(inputs)
         return response.text
     except Exception as e:
-        return f"Error Analisis: {str(e)}"
+        return f"System Audit Error: {str(e)}"
 
-# --- 5. TAMPILAN APLIKASI UTAMA ---
+# --- 6. FRONTEND APPLICATION ---
 
-# Header Depth Effect
+# Header
 st.markdown("""
-<div style="text-align: center; margin-bottom: 40px;">
-    <h1 style="margin:0;">KSB SUITE <span style="color:#64748b; font-size:0.5em; vertical-align:middle; border:1px solid #cbd5e1; border-radius:8px; padding:2px 8px;">FORENSIC</span></h1>
-    <p style="font-size: 0.9em; font-weight: 600; color: #64748b; margin-top:5px;">AI-POWERED TRADEMARK INTELLIGENCE</p>
+<div style="margin-bottom: 30px; border-bottom: 1px solid #e2e8f0; padding-bottom: 20px;">
+    <h1 style="margin:0;">KSB SUITE <span style="font-size:0.6em; background:#0f172a; color:white; padding:4px 8px; border-radius:6px; vertical-align:middle;">FORENSIC</span></h1>
+    <p style="color:#64748b; font-size: 0.9rem; margin-top:5px;">Professional Trademark Audit System v6.0</p>
 </div>
 """, unsafe_allow_html=True)
 
-# API Key Auto-Check
+# API Key Check (Silent)
 api_key = st.secrets.get("GOOGLE_API_KEY")
 if not api_key:
-    st.warning("⚠️ API Key tidak terdeteksi di Secrets.")
-    api_key = st.text_input("Input Manual API Key", type="password")
+    st.error("⚠️ SYSTEM ALERT: Security Key not found in environment.")
+    st.stop()
 
-# --- FORM INPUT (DALAM CARD) ---
+# Main Interface
 with st.container():
-    st.markdown('<div class="depth-card">', unsafe_allow_html=True)
+    # Input Card
+    st.markdown('<div class="audit-card">', unsafe_allow_html=True)
+    c1, c2 = st.columns([2, 1])
     
-    # Grid Layout untuk Input (Responsive)
-    col1, col2 = st.columns([1, 1])
+    with c1:
+        st.markdown("## 1. Subject Details")
+        brand_name = st.text_input("Trademark Name", placeholder="e.g. KASHAFA")
+        brand_class = st.selectbox("Nice Classification", FULL_CLASSES)
+        
+    with c2:
+        st.markdown("## 2. Visual Evidence")
+        upl_file = st.file_uploader("Upload Mark/Logo (Optional)", type=['png', 'jpg'])
+        if upl_file:
+            st.caption("File attached to audit case.")
+            
+    st.markdown('</div>', unsafe_allow_html=True)
     
-    with col1:
-        st.markdown("### 1. Identitas Merek")
-        brand_name = st.text_input("Nama Merek", placeholder="Contoh: KASHAFA")
-        brand_class = st.selectbox("Kelas Merek (Nice Classification)", FULL_CLASSES)
-    
-    with col2:
-        st.markdown("### 2. Bukti Visual (Opsional)")
-        uploaded_file = st.file_uploader("Upload Logo (JPG/PNG, Max 5MB)", type=["jpg", "jpeg", "png"])
-        if uploaded_file:
-            st.image(uploaded_file, width=100, caption="Preview Logo")
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    # Action Button
-    run_btn = st.button("JALANKAN AUDIT FORENSIK ⚡")
-
-# --- EKSEKUSI & HASIL ---
-if run_btn:
-    if not api_key or not brand_name:
-        st.error("Mohon lengkapi Nama Merek dan pastikan API Key aktif.")
-    else:
-        # Progress UI
-        progress_text = st.empty()
-        bar = st.progress(0)
-        
-        # Step 1: Legal Search
-        progress_text.text("🔍 Memindai Index PDKI (Legal Search)...")
-        bar.progress(30)
-        findings = smart_pdki_search(brand_name)
-        
-        # Step 2: AI Reasoning
-        progress_text.text("🧠 Menganalisis Fonetik, Visual, & Konseptual...")
-        bar.progress(70)
-        
-        analysis_result = analyze_with_context(api_key, brand_name, brand_class, findings, uploaded_file)
-        
-        bar.progress(100)
-        bar.empty()
-        progress_text.empty()
-        
-        # --- HASIL OUTPUT (DEPTH CARD) ---
-        st.markdown(f"""
-        <div class="depth-card" style="border-top: 5px solid #0f172a;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h2 style="margin:0;">HASIL AUDIT: {brand_name.upper()}</h2>
-                <span style="background:#e2e8f0; padding:5px 10px; border-radius:8px; font-weight:bold; font-size:0.8em; color:#475569;">VERIFIED BY GEMINI 2.5</span>
-            </div>
-            {analysis_result.replace('<table>', '<table style="width:100%; border-collapse:collapse;">')} 
-        </div>
-        """, unsafe_allow_html=True)
-        # Note: Replace logic above is simple fix to ensure table styling sticks in markdown
-        
-        # PDF Generator Logic
-        risk_status = "HIGH" if "🔴" in analysis_result else "SAFE"
-        pdf_bytes = generate_pdf_report(brand_name, brand_class, analysis_result, risk_status)
-        
-        col_d1, col_d2 = st.columns([3, 1])
-        with col_d2:
+    # Execution
+    if st.button("INITIATE AUDIT PROTOCOL"):
+        if not brand_name:
+            st.warning("Input Required: Trademark Name")
+        else:
+            # 1. Scanning
+            status_text = st.empty()
+            progress = st.progress(0)
+            
+            status_text.markdown("**Scanning Federal Database Index...**")
+            progress.progress(25)
+            findings = legal_index_search(brand_name)
+            
+            # 2. Auditing
+            status_text.markdown("**Running Forensic Analysis Algorithms...**")
+            progress.progress(60)
+            audit_text = run_system_audit(api_key, brand_name, brand_class, findings, upl_file)
+            
+            progress.progress(100)
+            status_text.empty()
+            progress.empty()
+            
+            # 3. Output
+            st.markdown('<div class="audit-card" style="border-left: 5px solid #0f172a;">', unsafe_allow_html=True)
+            st.markdown("## AUDIT FINDINGS")
+            st.markdown("---")
+            # Menampilkan hasil dengan rapi (tanpa tabel markdown yang mungkin pecah, text based report)
+            st.markdown(audit_text)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # 4. PDF Generation
+            # Extract Risk Level from text
+            risk_val = "LOW RISK"
+            if "HIGH RISK" in audit_text: risk_val = "HIGH RISK"
+            elif "MEDIUM RISK" in audit_text: risk_val = "MEDIUM RISK"
+            
+            pdf_data = create_professional_pdf(brand_name, brand_class, audit_text, risk_val)
+            
             st.download_button(
-                label="📥 DOWNLOAD REPORT (PDF)",
-                data=pdf_bytes,
-                file_name=f"AUDIT_{brand_name.upper()}.pdf",
+                label="📥 EXPORT OFFICIAL REPORT (PDF)",
+                data=pdf_data,
+                file_name=f"AUDIT_REPORT_{brand_name.upper()}.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
-
-# Footer
-st.markdown("<div style='height: 50px;'></div>", unsafe_allow_html=True)

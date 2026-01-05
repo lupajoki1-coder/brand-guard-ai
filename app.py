@@ -1,296 +1,239 @@
 import streamlit as st
 import google.generativeai as genai
-import Levenshtein
 from googlesearch import search
 from fpdf import FPDF
 import datetime
+import re
 
-# --- 1. KONFIGURASI UI/UX (MENGACU PADA INDEX.HTML) ---
+# --- 1. KONFIGURASI UI/UX PREMIUM ---
 st.set_page_config(
-    page_title="KSB Suite v6.0 (Ultima)", 
-    page_icon="🛡️", 
+    page_title="KSB Suite Audit", 
+    page_icon="⚖️", 
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed" # Tampilan lebih bersih
 )
 
-# Custom CSS untuk meniru gaya 'index.html' (Glassmorphism & Fonts)
+# Inject CSS untuk tampilan Audit Professional (Tables & Cards)
 st.markdown("""
 <style>
-    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@400;600;800&display=swap');
     
-    /* Global Style */
-    .stApp {
-        background-color: #f8fafc;
-        background-image: 
-            radial-gradient(at 0% 0%, hsla(210, 100%, 93%, 1) 0, transparent 50%), 
-            radial-gradient(at 100% 0%, hsla(190, 100%, 90%, 1) 0, transparent 50%);
-        font-family: 'Plus Jakarta Sans', sans-serif;
-    }
+    /* Base */
+    .stApp { background-color: #f1f5f9; font-family: 'Plus Jakarta Sans', sans-serif; }
     
-    /* Titles */
-    h1, h2, h3 { font-family: 'Outfit', sans-serif; color: #0f172a; }
-    
-    /* Glass Panel Cards */
-    .glass-card {
-        background: rgba(255, 255, 255, 0.65);
-        backdrop-filter: blur(24px);
-        border: 1px solid rgba(255, 255, 255, 0.8);
-        border-radius: 24px;
-        padding: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+    /* Audit Card */
+    .audit-card {
+        background: white;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+        border: 1px solid #e2e8f0;
         margin-bottom: 20px;
     }
     
-    /* Buttons */
-    .stButton>button {
-        background: linear-gradient(to right, #0ea5e9, #0284c7);
-        color: white;
-        border-radius: 16px;
-        font-weight: 700;
-        border: none;
-        padding: 0.75rem 1.5rem;
-        width: 100%;
-        box-shadow: 0 10px 15px -3px rgba(14, 165, 233, 0.3);
-        font-family: 'Outfit', sans-serif;
-    }
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 20px 25px -5px rgba(14, 165, 233, 0.4);
-    }
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; margin: 15px 0; font-size: 14px; }
+    th { background-color: #f8fafc; text-align: left; padding: 12px; border-bottom: 2px solid #e2e8f0; color: #64748b; font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+    td { padding: 12px; border-bottom: 1px solid #e2e8f0; color: #1e293b; font-weight: 500; }
     
-    /* Inputs */
-    .stTextInput>div>div>input, .stSelectbox>div>div>div {
-        border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        background-color: rgba(255,255,255,0.8);
+    /* Typography */
+    h1 { font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 800; letter-spacing: -1px; color: #0f172a; }
+    .metric-value { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #0ea5e9; }
+    
+    /* Button */
+    .stButton>button {
+        background-color: #0f172a; color: white; border-radius: 8px; 
+        font-weight: 600; padding: 0.6rem 2rem; border: none; width: 100%;
+        transition: all 0.2s;
     }
+    .stButton>button:hover { background-color: #334155; transform: scale(1.01); }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DATA REFERENSI (KELAS MEREK LENGKAP) ---
+# --- 2. DATA REFERENSI (KELAS MEREK SIMPLIFIED) ---
 NICE_CLASSES = [
-    "Kelas 1: Bahan Kimia Industri", "Kelas 2: Cat & Pernis", "Kelas 3: Kosmetik & Pembersih (Parfum, Skincare)",
-    "Kelas 4: Minyak & Bahan Bakar", "Kelas 5: Farmasi & Obat", "Kelas 6: Logam Tidak Mulia",
-    "Kelas 7: Mesin & Perkakas", "Kelas 8: Peralatan Tangan", "Kelas 9: Teknologi, Software, Kacamata",
-    "Kelas 10: Alat Medis", "Kelas 11: Alat Penerangan & Pemanas", "Kelas 12: Kendaraan",
-    "Kelas 13: Senjata Api", "Kelas 14: Perhiasan & Jam", "Kelas 15: Alat Musik",
-    "Kelas 16: Kertas & Alat Tulis", "Kelas 17: Karet & Plastik", "Kelas 18: Kulit & Tas",
-    "Kelas 19: Bahan Bangunan (Non-Logam)", "Kelas 20: Perabot & Mebel", "Kelas 21: Alat Rumah Tangga & Dapur",
-    "Kelas 22: Tali & Jaring", "Kelas 23: Benang", "Kelas 24: Tekstil",
-    "Kelas 25: Pakaian, Sepatu, Topi", "Kelas 26: Renda & Bordir", "Kelas 27: Karpet & Alas Lantai",
-    "Kelas 28: Mainan & Alat Olahraga", "Kelas 29: Daging, Ikan, Buah Olahan", "Kelas 30: Kopi, Teh, Roti, Beras",
-    "Kelas 31: Hasil Pertanian Segar", "Kelas 32: Minuman Non-Alkohol (Air, Jus)", "Kelas 33: Minuman Beralkohol",
-    "Kelas 34: Tembakau & Rokok",
-    "Kelas 35: Jasa Periklanan & Toko (Retail)", "Kelas 36: Jasa Keuangan & Real Estate",
-    "Kelas 37: Jasa Konstruksi & Perbaikan", "Kelas 38: Jasa Telekomunikasi", "Kelas 39: Jasa Transportasi",
-    "Kelas 40: Jasa Pengolahan Material", "Kelas 41: Jasa Pendidikan & Hiburan",
-    "Kelas 42: Jasa Teknologi & Desain (IT)", "Kelas 43: Jasa Makanan & Minuman (Restoran/Kafe)",
-    "Kelas 44: Jasa Medis & Kecantikan", "Kelas 45: Jasa Hukum & Keamanan"
+    "03 - Kosmetik & Parfum", "05 - Farmasi & Obat", "09 - Software & Elektronik", 
+    "25 - Pakaian & Sepatu", "30 - Kopi, Makanan, Roti", "32 - Minuman Non-Alkohol",
+    "35 - Jasa Toko/Retail & Iklan", "41 - Pendidikan & Event", "43 - Restoran & Kafe", 
+    "45 - Jasa Hukum & Keamanan", "Lainnya (Tulis Manual di Prompt)"
 ]
 
-# --- 3. FUNGSI SMART LEGAL SEARCH (PDKI) ---
-def search_pdki_smart(brand_name):
-    """
-    Melakukan pencarian cerdas ke index PDKI.
-    Mencari Nama Persis DAN Kata Dominan.
-    """
-    competitors = []
-    queries = [
-        f'site:pdki-indonesia.dgip.go.id "{brand_name}"', # Exact match
-        f'site:pdki-indonesia.dgip.go.id {brand_name}'   # Broad match
-    ]
-    
-    seen_urls = set()
-    
-    try:
-        for q in queries:
-            for url in search(q, num_results=5, lang="id"):
-                if url not in seen_urls:
-                    competitors.append(url)
-                    seen_urls.add(url)
-    except Exception as e:
-        return [f"Error searching: {str(e)}"]
-    
-    return competitors[:8] # Ambil 8 hasil terbaik
+# --- 3. FUNGSI PENDUKUNG ---
+def clean_for_pdf(text):
+    """Menghapus emoji dan karakter aneh untuk PDF FPDF standard"""
+    return text.encode('latin-1', 'ignore').decode('latin-1')
 
-# --- 4. ENGINE PDF GENERATOR (REPORTLAB STYLE) ---
-def create_pdf(brand, cls, analysis_text, risk_score):
+def create_audit_pdf(brand, cls, analysis_text, risk_score):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
     
-    # Header Styling
-    pdf.set_font("Arial", "B", 20)
-    pdf.set_text_color(15, 23, 42) # Slate-900
-    pdf.cell(0, 10, "KSB Suite Ultima Report", ln=True)
-    
-    pdf.set_font("Arial", "B", 10)
-    pdf.set_text_color(14, 165, 233) # Sky-500
-    pdf.cell(0, 8, "FORENSIC TRADEMARK AUDIT", ln=True)
+    # -- Header --
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "TRADEMARK FORENSIC AUDIT", 0, 1, 'C')
+    pdf.set_font("Arial", "", 8)
+    pdf.cell(0, 5, f"Re: {brand.upper()} ({cls}) | Date: {datetime.date.today()}", 0, 1, 'C')
     pdf.ln(5)
     
-    # Metadata
-    pdf.set_font("Arial", "", 10)
-    pdf.set_text_color(0, 0, 0)
-    pdf.cell(0, 6, f"Merek: {brand}", ln=True)
-    pdf.cell(0, 6, f"Kelas: {cls}", ln=True)
-    pdf.cell(0, 6, f"Tanggal: {datetime.date.today()}", ln=True)
-    pdf.cell(0, 6, f"Skor Risiko: {risk_score}", ln=True)
-    pdf.line(10, 50, 200, 50)
+    # -- Risk Box --
+    pdf.set_fill_color(241, 245, 249) # Slate-100
+    pdf.rect(10, 30, 190, 15, 'F')
+    pdf.set_y(33)
+    pdf.set_font("Arial", "B", 10)
+    pdf.cell(0, 5, f"RISK VERDICT: {risk_score.upper()}", 0, 1, 'C')
     pdf.ln(10)
     
-    # Body
-    pdf.set_font("Arial", "", 11)
-    # FPDF tidak support markdown, kita clean text sederhananya
-    clean_text = analysis_text.replace("*", "").replace("#", "")
-    pdf.multi_cell(0, 6, clean_text)
+    # -- Body Content (Structured) --
+    pdf.set_font("Courier", "", 10) # Monospace agar terlihat seperti laporan teknis
     
-    # Footer
-    pdf.set_y(-15)
-    pdf.set_font("Arial", "I", 8)
-    pdf.set_text_color(128, 128, 128)
-    pdf.cell(0, 10, "Generated by KSB Suite AI - Not Legal Advice", 0, 0, 'C')
+    # Kita bersihkan emoji dari teks AI agar PDF tidak error
+    clean_body = clean_for_pdf(analysis_text)
+    
+    # Hapus format markdown tabel garis (|) agar rapi di plain text PDF
+    clean_body = clean_body.replace("|", " ").replace("---", "-")
+    
+    pdf.multi_cell(0, 5, clean_body)
+    
+    # -- Footer --
+    pdf.set_y(-20)
+    pdf.set_font("Arial", "I", 7)
+    pdf.cell(0, 10, "CONFIDENTIAL // KSB SUITE ULTIMA AUTOMATED REPORT", 0, 0, 'C')
     
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 5. LOGIKA AI (GEMINI 2.5 FLASH) ---
-def analyze_brand_pro(api_key, model_ver, brand, cls, competitors):
-    genai.configure(api_key=api_key)
+def search_pdki_smart(brand_name):
+    competitors = []
     try:
-        model = genai.GenerativeModel(model_ver)
+        # Search Query yang sangat spesifik ke portal DJKI
+        query = f'site:pdki-indonesia.dgip.go.id "{brand_name}" OR {brand_name}'
+        for url in search(query, num_results=6, lang="id"):
+            competitors.append(url)
     except:
-        return "Error Model", "0%"
+        pass
+    return competitors
 
-    comp_list = "\n".join(competitors) if competitors else "Tidak ditemukan merek identik di index publik."
-
-    # PROMPT BERDASARKAN FILE PDF 'TIPS MEREK'
+# --- 4. ENGINE AI (AUDITOR MODE) ---
+def run_audit(api_key, brand, cls, competitors):
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.5-flash") # Menggunakan model tercepat
+    
+    comp_str = "\n".join(competitors) if competitors else "Nil (Tidak ditemukan di index publik)"
+    
+    # PROMPT "AUDITOR GALAK" (Tanpa Basa-basi)
     prompt = f"""
-    Bertindaklah sebagai Konsultan HKI Senior (Spesialis Merek Indonesia).
-    Lakukan Audit Forensik Merek berdasarkan UU No. 20 Tahun 2016.
+    ROLE: Lead Trademark Auditor.
+    TONE: Strict, Direct, No-Fluff, Corporate-Audit Style.
+    OBJECTIVE: Audit potensi penolakan merek berdasarkan UU Merek No 20 Tahun 2016.
 
-    DATA PEMOHON:
-    - Nama Merek: "{brand}"
-    - Kelas: {cls}
-    
-    DATA DATABASE (PDKI Index):
-    {comp_list}
+    TARGET: "{brand}" (Kelas {cls})
+    DATABASE FINDINGS:
+    {comp_str}
 
-    TUGAS ANALISIS (GUNAKAN 4 PRINSIP UTAMA):
-    
-    1. **ANALISIS FONETIK (Bunyi Ucapan)** [PENTING]
-       - Apakah ada kemiripan bunyi dengan merek terkenal? (Seperti kasus SANSUNG vs SAMSUNG).
-       - Cek pelafalan suku kata dominan.
-    
-    2. **ANALISIS KONSEPTUAL (Makna)**
-       - Apakah ini terjemahan dari merek asing terkenal? (Prinsip RED BULL vs BANTENG MERAH).
-       - Apakah memiliki makna yang sama dengan merek lain di kelas yang sama?
-    
-    3. **ANALISIS VISUAL (Tampilan)**
-       - Jika nama ini dibuat logo, apakah teksnya mudah dibedakan atau rawan "Si Kembar Beda Ibu"?
-    
-    4. **ANALISIS DISTINGSI (Daya Pembeda)**
-       - Apakah nama ini terlalu deskriptif/umum? (Contoh: "GULA MANIS" untuk produk gula akan DITOLAK MUTLAK).
-       - Apakah ini melanggar ketertiban umum?
+    INSTRUCTION:
+    1. Abaikan basa-basi pembuka/penutup. Langsung ke inti.
+    2. Wajib gunakan format TABEL MARKDOWN untuk analisis.
+    3. Gunakan Emoji Indikator: 🔴 (High Risk), 🟡 (Medium Risk), 🟢 (Safe/Low Risk).
 
-    OUTPUT FINAL:
-    Berikan kesimpulan tegas: **[PELUANG LOLOS: TINGGI / SEDANG / RENDAH]**.
-    Jelaskan alasannya dalam poin-poin singkat dan tajam.
+    OUTPUT FORMAT:
+
+    ### 1. EXECUTIVE SUMMARY
+    [Satu kalimat tajam kesimpulan akhir: LOLOS atau DITOLAK]
+
+    ### 2. FORENSIC MATRIX
+    | PARAMETER AUDIT | TEMUAN KRITIS | RISIKO |
+    | :--- | :--- | :--- |
+    | **Fonetik (Bunyi)** | [Analisis kemiripan bunyi dengan merek terkenal/database. Contoh: 'SANSUNG' vs 'SAMSUNG'] | [Emoji] |
+    | **Konseptual (Makna)** | [Analisis arti kata, terjemahan asing, atau makna menyesatkan] | [Emoji] |
+    | **Visual (Tampilan)** | [Potensi 'Si Kembar Beda Ibu' jika logo dibuat mirip] | [Emoji] |
+    | **Distingsi (Pembeda)** | [Apakah kata ini Generik/Deskriptif? Contoh: 'GULA' untuk produk Gula = Ditolak] | [Emoji] |
+
+    ### 3. REKOMENDASI TAKTIS
+    - [Saran 1: Ubah ejaan/tambah kata pembeda]
+    - [Saran 2: Strategi Logo]
     """
-
-    response = model.generate_content(prompt)
-    return response.text
-
-# --- 6. UI UTAMA (MAIN APP) ---
-
-# Sidebar Konfigurasi
-with st.sidebar:
-    st.markdown("### ⚙️ Control Panel")
     
-    # API Key Handling (Auto/Manual)
-    if "GOOGLE_API_KEY" in st.secrets:
-        api_key = st.secrets["GOOGLE_API_KEY"]
-        st.success("✅ API Key Terhubung")
-    else:
-        api_key = st.text_input("🔑 Google Gemini API Key", type="password")
-        st.caption("[Get API Key](https://aistudio.google.com/app/apikey)")
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"System Error: {str(e)}"
 
-    st.markdown("---")
-    
-    # Model Selector
-    model_version = st.selectbox(
-        "🧠 AI Engine",
-        ["gemini-2.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"],
-        index=0
-    )
-    st.info("Mode: Forensic Audit")
+# --- 5. ANTARMUKA APLIKASI ---
 
-# Layout Halaman Utama
-col1, col2 = st.columns([1, 1.5], gap="large")
-
-with col1:
-    # Hero Section
-    st.markdown("""
-    <div class="glass-card">
-        <h1 style='color:#0ea5e9; font-size:24px; margin-bottom:5px;'>KSB Suite <span style='font-size:12px; background:#e0f2fe; padding:2px 8px; border-radius:10px;'>ULTIMA</span></h1>
-        <h2 style='font-size:32px; font-weight:800; line-height:1.2;'>Forensic Audit<br>Protection.</h2>
-        <p style='color:#64748b; font-size:14px; margin-top:10px;'>
-            Cek potensi penolakan merek (Fonetik, Visual, Konseptual) sebelum pendaftaran hangus.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Input Form
-    with st.container():
-        st.markdown("#### 📝 Data Merek")
-        input_brand = st.text_input("Nama Merek", placeholder="Contoh: MANAKALA")
-        input_class = st.selectbox("Pilih Kelas (Nice Classification)", NICE_CLASSES)
-        
-        btn_process = st.button("✨ Jalankan Audit Forensik")
-
-with col2:
-    if btn_process:
-        if not api_key:
-            st.error("⚠️ Masukkan API Key di Sidebar.")
-        elif not input_brand:
-            st.warning("⚠️ Masukkan Nama Merek.")
-        else:
-            # 1. Searching
-            with st.status("🔍 Memindai Database PDKI & Global...", expanded=True) as status:
-                st.write("Mengontak index Google Search...")
-                competitors = search_pdki_smart(input_brand)
-                st.write(f"Ditemukan {len(competitors)} data pembanding potensial.")
-                status.update(label="Scanning Selesai", state="complete", expanded=False)
-            
-            # 2. AI Reasoning
-            with st.spinner("🤖 Melakukan Analisis 4 Dimensi (Fonetik, Visual, Konseptual, Distingsi)..."):
-                result_text = analyze_brand_pro(api_key, model_version, input_brand, input_class, competitors)
-            
-            # 3. Display Result (Card Style)
-            st.markdown(f"""
-            <div class="glass-card" style="border-left: 5px solid #0ea5e9;">
-                <h3 style="margin-top:0;">📊 Hasil Analisis AI</h3>
-                <hr style="margin: 10px 0; opacity: 0.2;">
-            </div>
-            """, unsafe_allow_html=True)
-            
-            st.markdown(result_text)
-            
-            # 4. PDF Download (Logic)
-            # Tentukan skor risiko kasar dari teks untuk metadata PDF
-            risk = "HIGH" if "RENDAH" in result_text.upper() else "LOW"
-            
-            pdf_bytes = create_pdf(input_brand, input_class, result_text, risk)
-            
-            st.download_button(
-                label="📄 Unduh Laporan Resmi (PDF)",
-                data=pdf_bytes,
-                file_name=f"AUDIT_MEREK_{input_brand.upper()}.pdf",
-                mime="application/pdf"
-            )
-
-# Footer
+# Header Section
 st.markdown("""
-<div style='text-align: center; color: #94a3b8; font-size: 12px; margin-top: 50px;'>
-    Powered by <b>Gemini 2.5 Flash</b> & <b>PDKI Index</b> | KSB Suite Ultima v6.0
-</div>
+    <div style='text-align: center; margin-bottom: 30px;'>
+        <h1 style='margin-bottom: -10px;'>KSB SUITE <span style='color:#0ea5e9;'>ULTIMA</span></h1>
+        <p style='color:#64748b; font-size: 14px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase;'>Automated Trademark Forensic</p>
+    </div>
 """, unsafe_allow_html=True)
+
+# Cek API Key Otomatis
+if "GOOGLE_API_KEY" in st.secrets:
+    api_key = st.secrets["GOOGLE_API_KEY"]
+else:
+    st.warning("⚠️ API Key belum tertanam di Secrets. Aplikasi mungkin tidak berjalan.")
+    api_key = st.text_input("Emergency API Input", type="password")
+
+# Container Utama
+with st.container():
+    # Gunakan Columns untuk layout Input yang rapi
+    c1, c2, c3 = st.columns([2, 1, 1])
+    
+    with c1:
+        brand_input = st.text_input("Target Merek", placeholder="Ketik nama merek...")
+    with c2:
+        class_input = st.selectbox("Kelas", NICE_CLASSES)
+    with c3:
+        st.write("") # Spacer
+        st.write("") 
+        btn_audit = st.button("RUN AUDIT ⚡")
+
+# Logic Eksekusi
+if btn_audit:
+    if not api_key:
+        st.error("Missing Credential: API Key")
+    elif not brand_input:
+        st.error("Missing Input: Nama Merek")
+    else:
+        # Progress Bar visual
+        progress_text = "Memindai Database PDKI & Melakukan Cross-Check..."
+        my_bar = st.progress(0, text=progress_text)
+        
+        # 1. Searching
+        competitors = search_pdki_smart(brand_input)
+        my_bar.progress(50, text="Menganalisis Fonetik & Semantik dengan AI...")
+        
+        # 2. Reasoning
+        audit_result = run_audit(api_key, brand_input, class_input, competitors)
+        my_bar.progress(100, text="Selesai.")
+        my_bar.empty()
+        
+        # 3. Tampilan Hasil (Card Style)
+        st.markdown(f"""
+        <div class="audit-card">
+            <h3 style="margin-top:0; color:#0f172a; border-bottom: 2px solid #0ea5e9; padding-bottom: 10px; margin-bottom: 20px;">
+                AUDIT REPORT: {brand_input.upper()}
+            </h3>
+            {audit_result}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 4. PDF Download Logic
+        # Tentukan status risiko kasar untuk metadata PDF
+        risk_level = "UNKNOWN"
+        if "🔴" in audit_result: risk_level = "HIGH RISK"
+        elif "🟡" in audit_result: risk_level = "MEDIUM RISK"
+        else: risk_level = "LOW RISK / SAFE"
+        
+        pdf_data = create_audit_pdf(brand_input, class_input, audit_result, risk_level)
+        
+        c_down1, c_down2 = st.columns([3, 1])
+        with c_down2:
+            st.download_button(
+                label="📥 UNDUH LAPORAN (PDF)",
+                data=pdf_data,
+                file_name=f"AUDIT_{brand_input.upper()}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )

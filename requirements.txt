@@ -3,3 +3,4 @@ google-generativeai
 python-Levenshtein
 googlesearch-python
 fpdf
+Pillow
